@@ -38,10 +38,19 @@ def create_data_loader(tfrecord_file, metadata_file, valid_size=0.5, seq_size=1,
 
     # If a sequence length was specified, contruct sequences using the batching function
     if seq_size > 1:
-        dataset = dataset.batch(seq_size)
+        dataset = dataset.batch(seq_size, drop_remainder=True)
 
     # Apply batching to the dataset
-    dataset = dataset.batch(batch_size)
+    if seq_size > 1:
+        dataset = dataset.window(batch_size, 1, seq_size, drop_remainder=True)
+        dataset = dataset.flat_map(
+            lambda img, label: tf.data.Dataset.zip((
+                img.batch(batch_size),
+                label.batch(batch_size)
+            ))
+        )
+    else:
+        dataset = dataset.batch(batch_size)
 
     # Compute the number of batches
     n_batches = tf.math.ceil(metadata["n_records"] / (seq_size * batch_size))
@@ -49,6 +58,11 @@ def create_data_loader(tfrecord_file, metadata_file, valid_size=0.5, seq_size=1,
     # Split the dataset into validation and training data
     dataset_train = dataset.take(int(valid_size * n_batches))
     dataset_valid = dataset.skip(int(valid_size * n_batches))
+    dataset_valid = dataset_valid.take(int((1. - valid_size) * n_batches))
+
+    # Prefetch data
+    dataset_train = dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    dataset_valid = dataset_valid.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
     # Return the datasets
     return dataset_train, dataset_valid
@@ -63,16 +77,14 @@ def main():
         metadata_file,
         valid_size=0.5,
         batch_size=32,
-        seq_size=16,
+        seq_size=4,
     )
 
-    for img, label in dataset_train.as_numpy_iterator():
-        print(img.shape)
-        break
+    for i, (img, label) in enumerate(dataset_train.as_numpy_iterator()):
+        print(i, img.shape, label.shape)
 
-    for img, label in dataset_valid.as_numpy_iterator():
-        print(img.shape)
-        break
+    for i, (img, label) in enumerate(dataset_valid.as_numpy_iterator()):
+        print(i, img.shape, label.shape)
 
 
 if __name__ == "__main__":
